@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>N₂ jet — single-pass isotope separation</title>
+<title>N₂ jet — mass separation</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
@@ -14,7 +14,9 @@ body {
   height: 100vh;
   overflow: hidden;
 }
+#stage { position: relative; flex: 1; min-width: 0; display: flex; }
 #canvas { display: block; flex: 1; min-width: 0; background: #080818; }
+#cascade { cursor: pointer; }
 #panel {
   width: 304px;
   min-width: 304px;
@@ -26,15 +28,54 @@ body {
   gap: 5px;
   overflow-y: auto;
 }
-h1 { font-size: 13px; color: #99bbff; letter-spacing: 0.04em; line-height: 1.2; }
+h1 { font-size: 13px; letter-spacing: 0.04em; line-height: 1.2; }
+#title-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: #99bbff;
+  font: inherit;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: left;
+}
+#title-btn:hover { text-decoration: underline; }
+#about {
+  display: none;
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  top: 8%;
+  transform: translateX(-50%);
+  width: min(460px, 88%);
+  background: rgba(10, 12, 28, 0.96);
+  border: 1px solid #3a4a70;
+  border-radius: 8px;
+  padding: 16px 18px 14px;
+  color: #d5deee;
+  font-size: 14px;
+  line-height: 1.45;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+#about.show { display: block; }
+#about p + p { margin-top: 10px; }
+#about .btn { margin-top: 12px; }
 .sub { font-size: 9px; color: #556688; line-height: 1.35; }
 .sep { border-top: 1px solid #161628; margin: 1px 0; }
-lbl {
+lbl, button.lbl {
   font-size: 10px; color: #7788aa; display: flex;
   justify-content: space-between; align-items: baseline;
   margin-bottom: 1px; gap: 6px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
 }
-lbl .v { color: #99bbdd; font-size: 9px; white-space: nowrap; }
+lbl .v, button.lbl .v { color: #99bbdd; font-size: 9px; white-space: nowrap; }
 input[type=range] { width: 100%; accent-color: #4466cc; cursor: pointer; height: 14px; }
 .btn {
   padding: 3px 5px;
@@ -68,16 +109,54 @@ select {
 .dual { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
 #stats { font-size: 10px; line-height: 1.5; }
 .srow { display: flex; justify-content: space-between; gap: 8px; }
+button.srow {
+  width: 100%;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 10px;
+  line-height: 1.5;
+  padding: 0 2px;
+  cursor: pointer;
+  text-align: left;
+}
 .sv { color: #aabbdd; font-variant-numeric: tabular-nums; }
 .sv.hot { color: #ffb020; }
 .sv.dim { color: #667799; }
 .legend { display: flex; flex-direction: column; gap: 2px; }
 .leg { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #aabbdd; }
+button.leg {
+  width: 100%;
+  background: none;
+  border: 0;
+  font: inherit;
+  color: #aabbdd;
+  cursor: pointer;
+  padding: 1px 2px;
+}
+.tip-hit.open { background: #1a1a36; border-radius: 2px; }
+#explain {
+  display: none;
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  font-size: 11px;
+  color: #d5deee;
+  line-height: 1.4;
+  background: #14142e;
+  border: 1px solid #3a4a70;
+  border-radius: 4px;
+  padding: 7px 8px;
+  margin-top: 4px;
+  cursor: pointer;
+}
+#explain.show { display: block; }
 .sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .note { font-size: 9px; color: #445566; line-height: 1.4; }
 #cascade {
   width: 100%;
-  height: 148px;
+  height: 176px;
   background: #080818;
   border: 1px solid #1a1a32;
   border-radius: 3px;
@@ -86,10 +165,17 @@ select {
 </style>
 </head>
 <body>
-<canvas id="canvas"></canvas>
+<div id="stage">
+  <canvas id="canvas"></canvas>
+  <div id="about">
+    <p>N₂ enters at the top, accelerates through the throat, and expands along the nozzle. Collisions hold ¹⁴N₂, ¹⁴N¹⁵N, and ¹⁵N₂ to one directed speed. At freeze-out the collisions stop. The lighter molecules keep a slightly larger sideways speed, so they arrive at wider angles. The skimmer retains the gas near the axis, where the heavier isotopologues are enriched.</p>
+    <p>The center cut can be sent through the same nozzle again. Each stage multiplies the enrichment. The curves below the skimmer are the arrival angles after the number of stages set on the right, drawn to a common peak. Their widths follow the ¹⁵N₂ fraction in that product. The molecules in the nozzle show a single stage.</p>
+    <button type="button" class="btn" id="about-close">Close</button>
+  </div>
+</div>
 <div id="panel">
-  <h1>N₂ jet</h1>
-  <div class="sub">Top → throat → free flight. Mass only. Cascade the center cut to build up ¹⁵N₂.</div>
+  <h1><button type="button" id="title-btn">N₂ jet</button></h1>
+  <div class="sub">Top to throat to free flight. Click a label for its meaning.</div>
 
   <div class="legend" id="legend"></div>
 
@@ -97,30 +183,30 @@ select {
   <div class="stage-label">Flow</div>
   <div class="dual">
     <div>
-      <lbl>Mach <span class="v" id="v-mach">5.0</span></lbl>
+      <button type="button" class="lbl tip-hit" data-tip="mach">Mach <span class="v" id="v-mach">5.0</span></button>
       <input type="range" id="sl-mach" min="1.5" max="10" step="0.1" value="5">
     </div>
     <div>
-      <lbl>T₀ <span class="v" id="v-t0">300 K</span></lbl>
+      <button type="button" class="lbl tip-hit" data-tip="t0">T₀ <span class="v" id="v-t0">300 K</span></button>
       <input type="range" id="sl-t0" min="100" max="500" step="10" value="300">
     </div>
     <div>
-      <lbl>Wall <span class="v" id="v-wall">5°</span></lbl>
+      <button type="button" class="lbl tip-hit" data-tip="wall">Wall <span class="v" id="v-wall">5.0°</span></button>
       <input type="range" id="sl-wall" min="0" max="30" step="0.5" value="5">
     </div>
     <div>
-      <lbl>Skimmer <span class="v" id="v-skim">4°</span></lbl>
+      <button type="button" class="lbl tip-hit" data-tip="skim">Skimmer <span class="v" id="v-skim">4.0°</span></button>
       <input type="range" id="sl-skim" min="0.5" max="25" step="0.1" value="4">
     </div>
   </div>
 
   <div class="sep"></div>
   <div class="stage-label">Molecules</div>
-  <lbl>On screen <span class="v" id="v-n">1800</span></lbl>
+  <button type="button" class="lbl tip-hit" data-tip="n">On screen <span class="v" id="v-n">1800</span></button>
   <input type="range" id="sl-n" min="400" max="4500" step="100" value="1800">
-  <lbl>Speed <span class="v" id="v-speed">1.0×</span></lbl>
+  <button type="button" class="lbl tip-hit" data-tip="speed">Speed <span class="v" id="v-speed">1.00×</span></button>
   <input type="range" id="sl-speed" min="0.25" max="3" step="0.05" value="1">
-  <lbl>Draw mix</lbl>
+  <button type="button" class="lbl tip-hit" data-tip="mix">Draw mix</button>
   <select id="sel-mix">
     <option value="equal" selected>Equal counts (see all three)</option>
     <option value="trace">Trace-rich (5% ¹⁵N₂)</option>
@@ -143,9 +229,9 @@ select {
 
   <div class="sep"></div>
   <div class="stage-label">Cascade the center cut</div>
-  <lbl>Enriching stages <span class="v" id="v-stages">40</span></lbl>
+  <button type="button" class="lbl tip-hit" data-tip="stages">Enriching stages <span class="v" id="v-stages">40</span></button>
   <input type="range" id="sl-stages" min="1" max="600" step="1" value="40">
-  <lbl>¹⁵N₂ target</lbl>
+  <button type="button" class="lbl tip-hit" data-tip="target">¹⁵N₂ target</button>
   <select id="sel-target">
     <option value="0.0001">0.01%</option>
     <option value="0.001">0.1%</option>
@@ -153,16 +239,17 @@ select {
     <option value="0.1">10%</option>
     <option value="0.5">50%</option>
   </select>
-  <canvas id="cascade" width="280" height="148"></canvas>
+  <canvas id="cascade" width="280" height="176"></canvas>
   <div id="stats-cascade"></div>
   <div class="note" id="cascade-note"></div>
+  <div id="explain"></div>
 </div>
 
 <script>
 const SPECIES = [
-  { key: '28', label: '¹⁴N₂', mass: 28.00614800892, feed: 0.99636 ** 2, color: '#7eb6ff' },
-  { key: '29', label: '¹⁴N¹⁵N', mass: 29.00318290336, feed: 2 * 0.99636 * 0.00364, color: '#ffb020' },
-  { key: '30', label: '¹⁵N₂', mass: 30.0002177978, feed: 0.00364 ** 2, color: '#ff6b5a' },
+  { key: '28', label: '¹⁴N₂', name: 'Two light atoms', mass: 28.00614800892, feed: 0.99636 ** 2, color: '#7eb6ff' },
+  { key: '29', label: '¹⁴N¹⁵N', name: 'One of each', mass: 29.00318290336, feed: 2 * 0.99636 * 0.00364, color: '#ffb020' },
+  { key: '30', label: '¹⁵N₂', name: 'Two heavy atoms', mass: 30.0002177978, feed: 0.00364 ** 2, color: '#ff6b5a' },
 ];
 const GAMMA = 1.4;
 const R_GAS = 8.314462618;
@@ -175,7 +262,7 @@ const Y_EXIT = 0.64;
 const Y_DET = 1.46;
 const INLET_W = 0.40;
 const THROAT_W = 0.046;
-const WORLD = { x0: -0.70, x1: 0.70, y0: -0.04, y1: 1.78 };
+const WORLD = { x0: -0.70, x1: 0.70, y0: -0.04, y1: 1.98 };
 const HIST_N = 41;
 const HIST_X = 0.62;
 
@@ -202,10 +289,13 @@ const hist = [new Float64Array(HIST_N), new Float64Array(HIST_N), new Float64Arr
 let view = { ox: 0, oy: 0, scale: 40 };
 
 const legend = document.getElementById('legend');
-SPECIES.forEach(sp => {
-  const row = document.createElement('div');
-  row.className = 'leg';
-  row.innerHTML = `<span class="sw" style="background:${sp.color}"></span><span>${sp.label}</span><span style="margin-left:auto;color:#556688">${sp.mass.toFixed(3)} u</span>`;
+const LEGEND_TIPS = ['sp28', 'sp29', 'sp30'];
+SPECIES.forEach((sp, i) => {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'leg tip-hit';
+  row.dataset.tip = LEGEND_TIPS[i];
+  row.innerHTML = `<span class="sw" style="background:${sp.color}"></span><span>${sp.label}</span><span style="margin-left:auto;color:#8899aa">${sp.mass.toFixed(3)} u</span>`;
   legend.appendChild(row);
 });
 
@@ -311,6 +401,93 @@ function passProbability(mass) {
     acc += normCdf(dHi / sigma) - normCdf(dLo / sigma);
   }
   return acc / n;
+}
+
+/** Share of molecules of this mass that land in each arrival bin. */
+function arrivalHistogram(mass) {
+  const sigma = sigmaTheta(mass);
+  const w = exitHalf();
+  const dy = Y_DET - Y_EXIT;
+  const n = 161;
+  const tanPhi = Math.tan(wallPhi());
+  const xiMax = 0.98;
+  const bins = new Float64Array(HIST_N);
+  const dx = (2 * HIST_X) / HIST_N;
+  for (let i = 0; i < n; i++) {
+    const xi = -xiMax + (2 * xiMax) * (i + 0.5) / n;
+    const theta = Math.atan(xi * tanPhi);
+    const xExit = xi * w;
+    for (let b = 0; b < HIST_N; b++) {
+      const xLo = -HIST_X + b * dx;
+      const xHi = xLo + dx;
+      const dLo = Math.atan((xLo - xExit) / dy) - theta;
+      const dHi = Math.atan((xHi - xExit) / dy) - theta;
+      bins[b] += normCdf(dHi / sigma) - normCdf(dLo / sigma);
+    }
+  }
+  for (let b = 0; b < HIST_N; b++) bins[b] /= n;
+  return bins;
+}
+
+function histStd(bins) {
+  const dx = (2 * HIST_X) / HIST_N;
+  let m0 = 0;
+  let m1 = 0;
+  let m2 = 0;
+  for (let i = 0; i < HIST_N; i++) {
+    const x = -HIST_X + (i + 0.5) * dx;
+    const p = bins[i];
+    m0 += p;
+    m1 += p * x;
+    m2 += p * x * x;
+  }
+  if (!(m0 > 0)) return 1e-6;
+  const mean = m1 / m0;
+  return Math.sqrt(Math.max(0, m2 / m0 - mean * mean));
+}
+
+/** Redraw a landing pattern so its width is `factor` times the original. */
+function stretchHist(bins, factor) {
+  const dx = (2 * HIST_X) / HIST_N;
+  const out = new Float64Array(HIST_N);
+  const f = Math.max(factor, 0.05);
+  for (let i = 0; i < HIST_N; i++) {
+    const x = -HIST_X + (i + 0.5) * dx;
+    const xs = x / f;
+    const t = (xs + HIST_X) / dx - 0.5;
+    const i0 = Math.floor(t);
+    const frac = t - i0;
+    const a = i0 >= 0 && i0 < HIST_N ? bins[i0] : 0;
+    const b = i0 + 1 >= 0 && i0 + 1 < HIST_N ? bins[i0 + 1] : 0;
+    out[i] = (a * (1 - frac) + b * frac) / f;
+  }
+  let peak = 0;
+  for (let i = 0; i < HIST_N; i++) peak = Math.max(peak, out[i]);
+  if (peak > 0) for (let i = 0; i < HIST_N; i++) out[i] /= peak;
+  return out;
+}
+
+let arrivalCache = null;
+function finalArrival() {
+  const stages = params.stages | 0;
+  const key = `${params.mach}|${params.wallDeg}|${params.skimDeg}|${stages}`;
+  if (arrivalCache && arrivalCache.key === key) return arrivalCache;
+  const t = SPECIES.map(sp => passProbability(sp.mass));
+  const a29 = t[1] / t[0];
+  const a30 = t[2] / t[0];
+  const kept = compositionAt(stages, a29, a30);
+  const pdfs = SPECIES.map(sp => arrivalHistogram(sp.mass));
+  const natural = pdfs.map(histStd);
+  const sig = SPECIES.map(sp => sigmaTheta(sp.mass));
+  const gap = sig.map(s => Math.max(0, 1 - s / sig[0]));
+  const scale = Math.max(1, kept.x30 / Math.max(gap[2], 1e-6));
+  const narrow = gap.map(g => Math.min(0.92, g * scale));
+  const weighted = pdfs.map((pdf, s) => {
+    const desired = natural[0] * (1 - narrow[s]);
+    return stretchHist(pdf, desired / natural[s]);
+  });
+  arrivalCache = { key, weighted, stages, narrow, x30: kept.x30 };
+  return arrivalCache;
 }
 
 function pickSpecies() {
@@ -538,33 +715,75 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+function arrivalDeg(x) {
+  return Math.atan(x / (Y_DET - Y_EXIT)) * 180 / Math.PI;
+}
+
 function drawHist() {
-  let peak = 1;
-  for (let s = 0; s < 3; s++) {
-    for (let i = 0; i < HIST_N; i++) peak = Math.max(peak, hist[s][i]);
-  }
-  if (peak <= 1) return;
-  const base = sy(1.74);
-  const top = sy(1.60);
-  ctx.globalAlpha = 0.9;
+  const pack = finalArrival();
+  const curves = pack.weighted;
+  const base = sy(1.72);
+  const top = sy(1.58);
+  const span = base - top;
+  const slit = slitHalf();
+  ctx.save();
+  ctx.strokeStyle = '#2a3348';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sx(-HIST_X), base);
+  ctx.lineTo(sx(HIST_X), base);
+  ctx.moveTo(sx(-HIST_X), top);
+  ctx.lineTo(sx(-HIST_X), base);
+  ctx.stroke();
+  ctx.strokeStyle = '#c9a24a';
+  ctx.globalAlpha = 0.45;
+  ctx.setLineDash([2, 3]);
+  ctx.beginPath();
+  ctx.moveTo(sx(-slit), top);
+  ctx.lineTo(sx(-slit), base);
+  ctx.moveTo(sx(slit), top);
+  ctx.lineTo(sx(slit), base);
+  ctx.stroke();
+  ctx.restore();
+
   for (let s = 0; s < 3; s++) {
     ctx.beginPath();
     for (let i = 0; i < HIST_N; i++) {
       const x = -HIST_X + (i + 0.5) * (2 * HIST_X) / HIST_N;
-      const h = (hist[s][i] / peak) * (base - top);
       const X = sx(x);
-      if (i === 0) ctx.moveTo(X, base - h);
-      else ctx.lineTo(X, base - h);
+      const Y = base - curves[s][i] * span;
+      if (i === 0) ctx.moveTo(X, Y);
+      else ctx.lineTo(X, Y);
     }
     ctx.strokeStyle = SPECIES[s].color;
-    ctx.lineWidth = 1.4;
+    ctx.globalAlpha = 0.95;
+    ctx.lineWidth = s === 2 ? 2 : 1.5;
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
-  ctx.fillStyle = '#556677';
+  ctx.fillStyle = '#8aa0b8';
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText('1', sx(-HIST_X) - 4, top + 4);
+  ctx.fillText('0', sx(-HIST_X) - 4, base + 3);
+  ctx.textAlign = 'left';
+  ctx.fillText('height / peak', sx(-HIST_X), top - 4);
+  const narrower = pack.narrow[2] * 100;
+  const narrowTxt = narrower < 10 ? narrower.toFixed(1) : String(Math.round(narrower));
+  const stageTxt = pack.stages === 1 ? 'after 1 stage' : `after ${pack.stages} stages`;
+  ctx.textAlign = 'right';
+  ctx.fillText(`${stageTxt} · ¹⁵N₂ ${narrowTxt}% narrower`, sx(HIST_X), top - 4);
+  ctx.fillStyle = '#9aabbe';
   ctx.font = '10px Segoe UI, system-ui, sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText('arrival tally', sx(WORLD.x0) + 4, top + 10);
+  ctx.fillText(arrivalDeg(-HIST_X).toFixed(0) + '°', sx(-HIST_X), sy(1.80));
+  ctx.textAlign = 'center';
+  ctx.fillText('0°', sx(0), sy(1.80));
+  ctx.textAlign = 'right';
+  ctx.fillText('+' + arrivalDeg(HIST_X).toFixed(0) + '°', sx(HIST_X), sy(1.80));
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#7f93ab';
+  ctx.fillText('angle from center', sx(0), sy(1.90));
 }
 
 function draw() {
@@ -598,19 +817,72 @@ function betaOf(i) {
   return { b, se };
 }
 
+function tipRow(key, label, valId, labId) {
+  const labAttr = labId ? ` id="${labId}"` : '';
+  return `<button type="button" class="srow tip-hit" data-tip="${key}"><span class="lab"${labAttr}>${label}</span><span class="sv" id="${valId}">…</span></button>`;
+}
+
+function setVal(id, html, tone) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.innerHTML = html;
+  el.className = tone ? `sv ${tone}` : 'sv';
+}
+
+let statsBuilt = false;
+function ensureStats() {
+  if (statsBuilt) return;
+  statsBuilt = true;
+  document.getElementById('stats-flow').innerHTML = [
+    tipRow('tfreeze', 'T freeze', 'val-tfreeze'),
+    tipRow('bulk', 'Bulk speed', 'val-bulk'),
+    tipRow('exit', 'Exit half-angle', 'val-exit'),
+    tipRow('spread28', '¹⁴N₂', 'val-spread28'),
+    tipRow('spread29', '¹⁴N¹⁵N', 'val-spread29'),
+    tipRow('spread30', '¹⁵N₂', 'val-spread30'),
+  ].join('');
+  document.getElementById('stats-sep').innerHTML = [
+    tipRow('counted', 'Counted', 'val-counted'),
+    tipRow('cut28', 'Cut of ¹⁴N₂', 'val-cut28'),
+    tipRow('b29t', 'β 29 theory', 'val-b29t'),
+    tipRow('b29m', 'β 29 measured', 'val-b29m'),
+    tipRow('b30t', 'β 30 theory', 'val-b30t'),
+    tipRow('b30m', 'β 30 measured', 'val-b30m'),
+    tipRow('ceiling', '√(m₂₉/m₂₈)', 'val-ceiling'),
+    tipRow('n15feed', '¹⁵N feed', 'val-n15feed'),
+    tipRow('n15prod', '¹⁵N product theory', 'val-n15prod'),
+    tipRow('n15meas', '¹⁵N product measured', 'val-n15meas'),
+    tipRow('center', 'Center', 'val-center'),
+    tipRow('wings', 'Wings', 'val-wings'),
+  ].join('');
+  document.getElementById('stats-cascade').innerHTML = [
+    tipRow('a30', 'α ¹⁵N₂', 'val-a30'),
+    tipRow('a29', 'α ¹⁴N¹⁵N', 'val-a29'),
+    tipRow('theta', 'Cut θ', 'val-theta'),
+    tipRow('after30', 'After 40', 'val-after30', 'lab-after30'),
+    tipRow('after29', '¹⁴N¹⁵N', 'val-after29'),
+    tipRow('gain', 'Gain', 'val-gain'),
+    tipRow('nto', 'Stages to target', 'val-nto'),
+    tipRow('strip', 'Stripper stages', 'val-strip'),
+    tipRow('series', 'Series F/P', 'val-series'),
+    tipRow('recycle', 'Recycle F/P', 'val-recycle'),
+  ].join('');
+  bindTipButtons(document);
+}
+
 function renderStats() {
+  ensureStats();
   const Tf = frozenT();
   const u = bulkSpeedMS(params.mach);
-  const flow = document.getElementById('stats-flow');
-  const sLines = SPECIES.map(sp => {
+  setVal('val-tfreeze', `${fmt(Tf, 1)} K`);
+  setVal('val-bulk', `${fmt(u, 0)} m/s`);
+  setVal('val-exit', `${fmt(params.wallDeg, 1)}°`);
+  SPECIES.forEach((sp, i) => {
     const S = speedRatio(sp.mass);
-    return `<div class="srow"><span>${sp.label}</span><span class="sv">S ${fmt(S, 2)} · σ ${fmt(sigmaTheta(sp.mass) * 180 / Math.PI, 2)}°</span></div>`;
-  }).join('');
-  flow.innerHTML = `
-    <div class="srow"><span>T freeze</span><span class="sv">${fmt(Tf, 1)} K</span></div>
-    <div class="srow"><span>Bulk speed</span><span class="sv">${fmt(u, 0)} m/s</span></div>
-    <div class="srow"><span>Exit half-angle</span><span class="sv">${fmt(params.wallDeg, 1)}°</span></div>
-    ${sLines}`;
+    const angle = sigmaTheta(sp.mass) * 180 / Math.PI;
+    const ids = ['val-spread28', 'val-spread29', 'val-spread30'];
+    setVal(ids[i], `S ${fmt(S, 2)} · σ ${fmt(angle, 2)}°`);
+  });
 
   const theories = SPECIES.map(sp => passProbability(sp.mass));
   const b29t = theories[1] / theories[0];
@@ -633,26 +905,24 @@ function renderStats() {
     x15meas = (wm[1] + 2 * wm[2]) / (2 * sm);
   }
 
-  const show = (stat) => stat == null
-    ? '<span class="sv dim">…</span>'
-    : `<span class="sv hot">${fmt(stat.b, 4)} ± ${fmt(stat.se, 4)}</span>`;
-  document.getElementById('stats-sep').innerHTML = `
-    <div class="srow"><span>Counted</span><span class="sv">${counted}</span></div>
-    <div class="srow"><span>Cut of ¹⁴N₂</span><span class="sv">${fmt(cut * 100, 1)}%</span></div>
-    <div class="srow"><span>β 29 theory</span><span class="sv">${fmt(b29t, 4)}</span></div>
-    <div class="srow"><span>β 29 measured</span>${show(b29)}</div>
-    <div class="srow"><span>β 30 theory</span><span class="sv">${fmt(b30t, 4)}</span></div>
-    <div class="srow"><span>β 30 measured</span>${show(b30)}</div>
-    <div class="srow"><span>√(m₂₉/m₂₈)</span><span class="sv">${fmt(Math.sqrt(SPECIES[1].mass / SPECIES[0].mass), 4)}</span></div>
-    <div class="srow"><span>¹⁵N feed</span><span class="sv">${pct(x15feed)}</span></div>
-    <div class="srow"><span>¹⁵N product theory</span><span class="sv">${pct(x15prod)}</span></div>
-    <div class="srow"><span>¹⁵N product measured</span>${x15meas == null ? '<span class="sv dim">…</span>' : `<span class="sv hot">${pct(x15meas)}</span>`}</div>
-    <div class="srow"><span>Center</span><span class="sv">${pass[0]} · ${pass[1]} · ${pass[2]}</span></div>
-    <div class="srow"><span>Wings</span><span class="sv">${wing[0]} · ${wing[1]} · ${wing[2]}</span></div>`;
+  const show = (stat) => stat == null ? '…' : `${fmt(stat.b, 4)}× ± ${fmt(stat.se, 4)}`;
+  setVal('val-counted', String(counted));
+  setVal('val-cut28', `${fmt(cut * 100, 1)}%`);
+  setVal('val-b29t', `${fmt(b29t, 4)}×`);
+  setVal('val-b29m', show(b29), b29 ? 'hot' : 'dim');
+  setVal('val-b30t', `${fmt(b30t, 4)}×`);
+  setVal('val-b30m', show(b30), b30 ? 'hot' : 'dim');
+  setVal('val-ceiling', `${fmt(Math.sqrt(SPECIES[1].mass / SPECIES[0].mass), 4)}×`);
+  setVal('val-n15feed', pct(x15feed));
+  setVal('val-n15prod', pct(x15prod));
+  setVal('val-n15meas', x15meas == null ? '…' : pct(x15meas), x15meas == null ? 'dim' : 'hot');
+  setVal('val-center', `${pass[0]} · ${pass[1]} · ${pass[2]}`);
+  setVal('val-wings', `${wing[0]} · ${wing[1]} · ${wing[2]}`);
 
   document.getElementById('note').textContent =
-    'β is (nᵢ/n₂₈) in the center divided by the same ratio in the feed. The heavy molecules stay nearer the axis.';
+    'β is the skimmer transmission relative to ¹⁴N₂. Heavier isotopologues stay nearer the axis.';
   renderCascade(theories);
+  paintTips();
 }
 
 const R29_0 = SPECIES[1].feed / SPECIES[0].feed;
@@ -682,7 +952,7 @@ function stagesUntil(target, a29, a30) {
 function fmtX(x) {
   if (x >= 0.01) return (x * 100).toFixed(2) + '%';
   if (x >= 1e-4) return (x * 100).toFixed(4) + '%';
-  return x.toExponential(2);
+  return x.toExponential(2) + ' mol/mol';
 }
 
 function supExp(log10v) {
@@ -729,21 +999,21 @@ function renderCascade(t) {
     }
   }
 
-  const box = document.getElementById('stats-cascade');
-  box.innerHTML = `
-    <div class="srow"><span>α ¹⁵N₂</span><span class="sv hot">${fmt(a30, 4)}</span></div>
-    <div class="srow"><span>α ¹⁴N¹⁵N</span><span class="sv">${fmt(a29, 4)}</span></div>
-    <div class="srow"><span>Cut θ</span><span class="sv">${fmt(theta0 * 100, 1)}%</span></div>
-    <div class="srow"><span>After ${nMark}</span><span class="sv hot">${fmtX(here.x30)} ¹⁵N₂</span></div>
-    <div class="srow"><span></span><span class="sv">${fmtX(here.x29)} ¹⁴N¹⁵N</span></div>
-    <div class="srow"><span>Gain</span><span class="sv">×${fmtGain(here.x30 / xF)}</span></div>
-    <div class="srow"><span>Stages to target</span><span class="sv">${nE == null ? '—' : nE}</span></div>
-    <div class="srow"><span>Stripper stages</span><span class="sv">${nS == null ? '—' : nS}</span></div>
-    <div class="srow"><span>Series F/P to target</span><span class="sv">${nE == null ? '—' : supExp(logSeries)}</span></div>
-    <div class="srow"><span>Recycle F/P to target</span><span class="sv">${feedPer == null ? '—' : supExp(Math.log10(feedPer))}</span></div>`;
+  const afterLab = document.getElementById('lab-after30');
+  if (afterLab) afterLab.textContent = `After ${nMark}`;
+  setVal('val-a30', `${fmt(a30, 4)}×`, 'hot');
+  setVal('val-a29', `${fmt(a29, 4)}×`);
+  setVal('val-theta', `${fmt(theta0 * 100, 1)}%`);
+  setVal('val-after30', fmtX(here.x30), 'hot');
+  setVal('val-after29', fmtX(here.x29));
+  setVal('val-gain', `×${fmtGain(here.x30 / xF)}`);
+  setVal('val-nto', nE == null ? '—' : String(nE));
+  setVal('val-strip', nS == null ? '—' : String(nS));
+  setVal('val-series', nE == null ? '—' : supExp(logSeries));
+  setVal('val-recycle', feedPer == null ? '—' : supExp(Math.log10(feedPer)));
 
   document.getElementById('cascade-note').textContent =
-    'Each center cut multiplies the ¹⁵N₂ / ¹⁴N₂ ratio by α. Series discards the wings, so the feed multiplies by about 1/θ every stage. Recycling the wings, and stripping the waste to a tenth of natural ¹⁵N₂, is the diffusion-plant arrangement. ¹⁴N¹⁵N is enriched by the same jets and stays abundant for a long way up the cascade.';
+    'α is the enrichment of one center cut. Series F/P discards the wings. Recycle F/P returns them.';
 
   drawCascadeChart(a29, a30, nMark, nE, target);
 }
@@ -761,10 +1031,10 @@ function drawCascadeChart(a29, a30, nMark, nE, target) {
   const nMax = Math.max(2, Math.min(800, Math.max(nMark, nE || 0)));
   const yLo = -6;
   const yHi = 0;
-  const padL = 38;
+  const padL = 52;
   const padR = 8;
-  const padT = 14;
-  const padB = 16;
+  const padT = 16;
+  const padB = 28;
   const X = (n) => padL + (n / nMax) * (w - padL - padR);
   const Y = (x) => {
     const ly = Math.log10(Math.max(x, 1e-8));
@@ -782,11 +1052,22 @@ function drawCascadeChart(a29, a30, nMark, nE, target) {
     g.moveTo(padL, y);
     g.lineTo(w - padR, y);
     g.stroke();
-    g.fillText(dec === 0 ? '1' : ('1e' + dec), padL - 3, y + 3);
+    g.fillText(dec === 0 ? '1' : ('1e' + dec), padL - 4, y + 3);
   }
+  g.save();
+  g.translate(11, (padT + (h - padB)) / 2);
+  g.rotate(-Math.PI / 2);
   g.textAlign = 'center';
-  g.fillText('0', X(0), h - 4);
-  g.fillText(String(nMax), X(nMax), h - 4);
+  g.textBaseline = 'middle';
+  g.fillStyle = '#7f93ab';
+  g.fillText('mole fraction', 0, 0);
+  g.restore();
+  g.fillStyle = '#556677';
+  g.textAlign = 'center';
+  g.fillText('0', X(0), h - 14);
+  g.fillText(String(nMax), X(nMax), h - 14);
+  g.fillStyle = '#7f93ab';
+  g.fillText('stages', (padL + w - padR) / 2, h - 3);
 
   function strokeComp(idx, color) {
     g.beginPath();
@@ -830,7 +1111,82 @@ function drawCascadeChart(a29, a30, nMark, nE, target) {
   g.fillStyle = '#ff6b5a';
   g.fillText('¹⁵N₂', padL + 4, 11);
   g.fillStyle = '#ffb020';
-  g.fillText('¹⁴N¹⁵N', padL + 46, 11);
+  g.fillText('¹⁴N¹⁵N', padL + 36, 11);
+}
+
+const TIPS = {
+  mach: 'Mach number at freeze-out. A higher value tightens the angular spread.',
+  t0: 'Stagnation temperature. It sets the flow speed. The angles do not depend on it.',
+  wall: 'Half-angle of the nozzle wall, in degrees. It sets how far the streamlines diverge before the thermal spread is added.',
+  skim: 'Skimmer half-angle from the nozzle exit, in degrees. A smaller angle takes a smaller cut and a higher heavy fraction.',
+  n: 'Number of molecules on screen.',
+  speed: 'Playback rate of the animation.',
+  mix: 'Relative numbers drawn for ¹⁴N₂, ¹⁴N¹⁵N, and ¹⁵N₂. The separation figures use natural abundance.',
+  stages: 'Center cuts in series. The arrival curves are the result after this many stages.',
+  target: '¹⁵N₂ mole fraction sought in the center product.',
+  sp28: '¹⁴N₂. Mass in atomic mass units. Widest arrival angles of the three.',
+  sp29: '¹⁴N¹⁵N. Mass in atomic mass units.',
+  sp30: '¹⁵N₂. Mass in atomic mass units. Narrowest arrival angles of the three.',
+  tfreeze: 'Temperature at freeze-out, where collisions stop. In kelvin.',
+  bulk: 'Directed speed at freeze-out, the same for all three isotopologues. In meters per second.',
+  exit: 'Wall half-angle at the nozzle exit. Same value as Wall.',
+  spread28: 'Speed ratio S and rms angle σ for ¹⁴N₂. S is the directed speed over the thermal speed. σ is in degrees.',
+  spread29: 'S and σ for ¹⁴N¹⁵N. The angle is slightly smaller than for ¹⁴N₂.',
+  spread30: 'S and σ for ¹⁵N₂. The smallest angle of the three.',
+  counted: 'Molecules that have reached the skimmer in this view.',
+  cut28: 'Fraction of ¹⁴N₂ that passes the skimmer, for one stage.',
+  b29t: 'β for ¹⁴N¹⁵N: its skimmer transmission divided by that of ¹⁴N₂, from the angle distributions.',
+  b29m: 'The same β, from the molecules on screen.',
+  b30t: 'β for ¹⁵N₂, from the angle distributions.',
+  b30m: 'The same β, from the molecules on screen.',
+  ceiling: '√(m of ¹⁴N¹⁵N / m of ¹⁴N₂). The upper bound on β for a vanishingly thin skimmer on the axis.',
+  n15feed: 'Atom fraction of ¹⁵N in the feed.',
+  n15prod: 'Atom fraction of ¹⁵N in the skimmer product, from the angle distributions.',
+  n15meas: 'The same atom fraction, from the molecules on screen.',
+  center: 'Counts inside the skimmer: ¹⁴N₂ · ¹⁴N¹⁵N · ¹⁵N₂.',
+  wings: 'Counts outside the skimmer, in the same order.',
+  a30: 'Separation factor α for ¹⁵N₂. One center cut multiplies the ¹⁵N₂/¹⁴N₂ ratio by this number. Further stages multiply again.',
+  a29: 'Separation factor α for ¹⁴N¹⁵N relative to ¹⁴N₂, for one center cut.',
+  theta: 'Cut. Fraction of the feed that passes the skimmer.',
+  after30: '¹⁵N₂ mole fraction in the center product after the listed number of stages.',
+  after29: '¹⁴N¹⁵N mole fraction in that product.',
+  gain: '¹⁵N₂ mole fraction in the product, divided by its mole fraction in natural N₂.',
+  nto: 'Center-cut stages required to reach the ¹⁵N₂ target.',
+  strip: 'Waste-side stages that bring ¹⁵N₂ in the discarded gas down to a tenth of natural.',
+  series: 'Feed per unit product when the wings are discarded. Dimensionless.',
+  recycle: 'Feed per unit product when the wings are returned and the waste is stripped to a tenth of natural ¹⁵N₂.',
+  tally: 'Arrival angle after the selected stages. Height is relative to each curve’s own peak. ¹⁵N₂ is narrower than ¹⁴N₂ in proportion to its mole fraction in the product; ¹⁴N¹⁵N narrows by about half as much. Gold lines are the skimmer edges.',
+  chart: 'Mole fraction in the center product against number of stages. The vertical scale is logarithmic. Red is ¹⁵N₂, orange is ¹⁴N¹⁵N. The dashed line is the target. The blue line is the selected stage count.',
+};
+
+let openTip = null;
+
+function bindTipButtons(root) {
+  (root || document).querySelectorAll('.tip-hit').forEach(btn => {
+    if (btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', () => toggleTip(btn.dataset.tip));
+  });
+}
+
+function toggleTip(key) {
+  openTip = openTip === key ? null : key;
+  paintTips();
+}
+
+function paintTips() {
+  const box = document.getElementById('explain');
+  document.querySelectorAll('.tip-hit').forEach(btn => {
+    btn.classList.toggle('open', btn.dataset.tip === openTip);
+  });
+  if (!box) return;
+  if (!openTip || !TIPS[openTip]) {
+    box.classList.remove('show');
+    box.textContent = '';
+    return;
+  }
+  box.classList.add('show');
+  box.textContent = TIPS[openTip];
 }
 
 function bindRange(id, key, labelId, format, reset) {
@@ -870,6 +1226,35 @@ document.getElementById('btn-pause').addEventListener('click', () => {
   document.getElementById('btn-pause').classList.toggle('active', params.paused);
 });
 document.getElementById('btn-reset').addEventListener('click', () => { resetAll(); renderStats(); });
+
+document.getElementById('explain').addEventListener('click', () => {
+  if (openTip) toggleTip(openTip);
+});
+document.getElementById('title-btn').addEventListener('click', () => {
+  document.getElementById('about').classList.toggle('show');
+});
+document.getElementById('about-close').addEventListener('click', () => {
+  document.getElementById('about').classList.remove('show');
+});
+document.getElementById('cascade').addEventListener('click', () => toggleTip('chart'));
+canvas.addEventListener('mousemove', (ev) => {
+  const y = ev.clientY - canvas.getBoundingClientRect().top;
+  const top = sy(1.54);
+  const base = sy(1.94);
+  canvas.style.cursor = (y >= top && y <= base) ? 'pointer' : 'default';
+});
+canvas.addEventListener('click', (ev) => {
+  const about = document.getElementById('about');
+  const y = ev.clientY - canvas.getBoundingClientRect().top;
+  const top = sy(1.54);
+  const base = sy(1.94);
+  if (about.classList.contains('show')) {
+    about.classList.remove('show');
+    return;
+  }
+  if (y >= top && y <= base) toggleTip('tally');
+});
+bindTipButtons(document);
 
 window.addEventListener('resize', resize);
 resize();
