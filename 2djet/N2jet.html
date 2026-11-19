@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>N₂ jet — single-pass isotope separation</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #080818;
+  color: #dde;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+#canvas { display: block; flex: 1; min-width: 0; background: #080818; }
+#panel {
+  width: 304px;
+  min-width: 304px;
+  padding: 8px 10px 12px;
+  background: #0b0b20;
+  border-left: 1px solid #1a1a32;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-y: auto;
+}
+h1 { font-size: 13px; color: #99bbff; letter-spacing: 0.04em; line-height: 1.2; }
+.sub { font-size: 9px; color: #556688; line-height: 1.35; }
+.sep { border-top: 1px solid #161628; margin: 1px 0; }
+lbl {
+  font-size: 10px; color: #7788aa; display: flex;
+  justify-content: space-between; align-items: baseline;
+  margin-bottom: 1px; gap: 6px;
+}
+lbl .v { color: #99bbdd; font-size: 9px; white-space: nowrap; }
+input[type=range] { width: 100%; accent-color: #4466cc; cursor: pointer; height: 14px; }
+.btn {
+  padding: 3px 5px;
+  border: 1px solid #222244;
+  background: #0e0e2a;
+  color: #c8d4f0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 10px;
+  text-align: center;
+  line-height: 1.3;
+}
+.btn:hover { background: #1c1c3e; }
+.btn.active { outline: 1.5px solid #99bbff; outline-offset: -1.5px; background: #181840; }
+.act-row { display: flex; gap: 3px; }
+.act-row .btn { flex: 1; }
+select {
+  width: 100%;
+  background: #0e0e2a;
+  color: #c8d4f0;
+  border: 1px solid #222244;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 10px;
+}
+.stage-label {
+  font-size: 8px; color: #6a7fa8; text-transform: uppercase;
+  letter-spacing: 0.06em; border-bottom: 1px solid #1a2030;
+  padding-bottom: 1px; margin-top: 2px;
+}
+.dual { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px; }
+#stats { font-size: 10px; line-height: 1.5; }
+.srow { display: flex; justify-content: space-between; gap: 8px; }
+.sv { color: #aabbdd; font-variant-numeric: tabular-nums; }
+.sv.hot { color: #ffb020; }
+.sv.dim { color: #667799; }
+.legend { display: flex; flex-direction: column; gap: 2px; }
+.leg { display: flex; align-items: center; gap: 6px; font-size: 10px; color: #aabbdd; }
+.sw { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.note { font-size: 9px; color: #445566; line-height: 1.4; }
+#cascade {
+  width: 100%;
+  height: 148px;
+  background: #080818;
+  border: 1px solid #1a1a32;
+  border-radius: 3px;
+  display: block;
+}
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+<div id="panel">
+  <h1>N₂ jet</h1>
+  <div class="sub">Top → throat → free flight. Mass only. Cascade the center cut to build up ¹⁵N₂.</div>
+
+  <div class="legend" id="legend"></div>
+
+  <div class="sep"></div>
+  <div class="stage-label">Flow</div>
+  <div class="dual">
+    <div>
+      <lbl>Mach <span class="v" id="v-mach">5.0</span></lbl>
+      <input type="range" id="sl-mach" min="1.5" max="10" step="0.1" value="5">
+    </div>
+    <div>
+      <lbl>T₀ <span class="v" id="v-t0">300 K</span></lbl>
+      <input type="range" id="sl-t0" min="100" max="500" step="10" value="300">
+    </div>
+    <div>
+      <lbl>Wall <span class="v" id="v-wall">5°</span></lbl>
+      <input type="range" id="sl-wall" min="0" max="30" step="0.5" value="5">
+    </div>
+    <div>
+      <lbl>Skimmer <span class="v" id="v-skim">4°</span></lbl>
+      <input type="range" id="sl-skim" min="0.5" max="25" step="0.1" value="4">
+    </div>
+  </div>
+
+  <div class="sep"></div>
+  <div class="stage-label">Molecules</div>
+  <lbl>On screen <span class="v" id="v-n">1800</span></lbl>
+  <input type="range" id="sl-n" min="400" max="4500" step="100" value="1800">
+  <lbl>Speed <span class="v" id="v-speed">1.0×</span></lbl>
+  <input type="range" id="sl-speed" min="0.25" max="3" step="0.05" value="1">
+  <lbl>Draw mix</lbl>
+  <select id="sel-mix">
+    <option value="equal" selected>Equal counts (see all three)</option>
+    <option value="trace">Trace-rich (5% ¹⁵N₂)</option>
+    <option value="natural">Natural abundance</option>
+  </select>
+
+  <div class="act-row">
+    <button class="btn" id="btn-pause">Pause</button>
+    <button class="btn" id="btn-reset">Reset counts</button>
+  </div>
+
+  <div class="sep"></div>
+  <div class="stage-label">State at freeze-out</div>
+  <div id="stats-flow"></div>
+
+  <div class="sep"></div>
+  <div class="stage-label">Single pass at the skimmer</div>
+  <div id="stats-sep"></div>
+  <div class="note" id="note"></div>
+
+  <div class="sep"></div>
+  <div class="stage-label">Cascade the center cut</div>
+  <lbl>Enriching stages <span class="v" id="v-stages">40</span></lbl>
+  <input type="range" id="sl-stages" min="1" max="600" step="1" value="40">
+  <lbl>¹⁵N₂ target</lbl>
+  <select id="sel-target">
+    <option value="0.0001">0.01%</option>
+    <option value="0.001">0.1%</option>
+    <option value="0.01" selected>1%</option>
+    <option value="0.1">10%</option>
+    <option value="0.5">50%</option>
+  </select>
+  <canvas id="cascade" width="280" height="148"></canvas>
+  <div id="stats-cascade"></div>
+  <div class="note" id="cascade-note"></div>
+</div>
+
+<script>
+const SPECIES = [
+  { key: '28', label: '¹⁴N₂', mass: 28.00614800892, feed: 0.99636 ** 2, color: '#7eb6ff' },
+  { key: '29', label: '¹⁴N¹⁵N', mass: 29.00318290336, feed: 2 * 0.99636 * 0.00364, color: '#ffb020' },
+  { key: '30', label: '¹⁵N₂', mass: 30.0002177978, feed: 0.00364 ** 2, color: '#ff6b5a' },
+];
+const GAMMA = 1.4;
+const R_GAS = 8.314462618;
+const M_MEAN = SPECIES.reduce((s, sp) => s + sp.feed * sp.mass, 0);
+
+const Y_INLET = 0.05;
+const Y_CONV0 = 0.12;
+const Y_THROAT = 0.40;
+const Y_EXIT = 0.64;
+const Y_DET = 1.46;
+const INLET_W = 0.40;
+const THROAT_W = 0.046;
+const WORLD = { x0: -0.70, x1: 0.70, y0: -0.04, y1: 1.78 };
+const HIST_N = 41;
+const HIST_X = 0.62;
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+
+const params = {
+  mach: 5,
+  t0: 300,
+  wallDeg: 5,
+  skimDeg: 4,
+  nTarget: 1800,
+  speed: 1,
+  mix: 'equal',
+  paused: false,
+  stages: 40,
+  target: 0.01,
+};
+
+const particles = [];
+const pass = [0, 0, 0];
+const wing = [0, 0, 0];
+const hist = [new Float64Array(HIST_N), new Float64Array(HIST_N), new Float64Array(HIST_N)];
+let view = { ox: 0, oy: 0, scale: 40 };
+
+const legend = document.getElementById('legend');
+SPECIES.forEach(sp => {
+  const row = document.createElement('div');
+  row.className = 'leg';
+  row.innerHTML = `<span class="sw" style="background:${sp.color}"></span><span>${sp.label}</span><span style="margin-left:auto;color:#556688">${sp.mass.toFixed(3)} u</span>`;
+  legend.appendChild(row);
+});
+
+function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+function erf(x) {
+  const s = Math.sign(x);
+  const a = Math.abs(x);
+  const t = 1 / (1 + 0.3275911 * a);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-a * a);
+  return s * y;
+}
+function normCdf(z) { return 0.5 * (1 + erf(z / Math.SQRT2)); }
+function gauss() {
+  let u = 0;
+  while (u === 0) u = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * Math.random());
+}
+
+function wallPhi() { return params.wallDeg * Math.PI / 180; }
+function skimAlpha() { return params.skimDeg * Math.PI / 180; }
+
+function exitHalf() {
+  return THROAT_W + (Y_EXIT - Y_THROAT) * Math.tan(wallPhi());
+}
+
+function halfWidth(y) {
+  const exitW = exitHalf();
+  if (y <= Y_CONV0) return INLET_W;
+  if (y <= Y_THROAT) {
+    const t = (y - Y_CONV0) / (Y_THROAT - Y_CONV0);
+    const s = t * t * (3 - 2 * t);
+    return INLET_W + (THROAT_W - INLET_W) * s;
+  }
+  if (y <= Y_EXIT) {
+    const t = (y - Y_THROAT) / (Y_EXIT - Y_THROAT);
+    return THROAT_W + (exitW - THROAT_W) * t;
+  }
+  return exitW;
+}
+
+function dHalfWidth(y) {
+  const e = 2e-4;
+  return (halfWidth(y + e) - halfWidth(y - e)) / (2 * e);
+}
+
+function machAt(y) {
+  const M = params.mach;
+  if (y <= Y_CONV0) return 0.12;
+  if (y <= Y_THROAT) {
+    const t = clamp((y - Y_CONV0) / (Y_THROAT - Y_CONV0), 0, 1);
+    return 0.12 + 0.88 * t;
+  }
+  if (y <= Y_EXIT) {
+    const t = clamp((y - Y_THROAT) / (Y_EXIT - Y_THROAT), 0, 1);
+    return 1 + (M - 1) * t;
+  }
+  return M;
+}
+
+function frozenT() {
+  return params.t0 / (1 + 0.5 * (GAMMA - 1) * params.mach * params.mach);
+}
+
+function bulkSpeedMS(mach) {
+  const T = params.t0 / (1 + 0.5 * (GAMMA - 1) * mach * mach);
+  return mach * Math.sqrt(GAMMA * R_GAS * T / (M_MEAN * 1e-3));
+}
+
+/** World length per second. Tuned so a Mach 5 pass reaches the slit in about a second. */
+function worldSpeed(mach) {
+  return bulkSpeedMS(mach) * 0.0015;
+}
+
+function speedRatio(mass) {
+  return params.mach * Math.sqrt((GAMMA * mass) / (2 * M_MEAN));
+}
+
+function sigmaTheta(mass) {
+  return 1 / (speedRatio(mass) * Math.SQRT2);
+}
+
+function slitHalf() {
+  return (Y_DET - Y_EXIT) * Math.tan(skimAlpha());
+}
+
+/** Probability a molecule of this mass crosses the detector inside the slit. */
+function passProbability(mass) {
+  const sigma = sigmaTheta(mass);
+  const phi = wallPhi();
+  const w = exitHalf();
+  const dy = Y_DET - Y_EXIT;
+  const slit = slitHalf();
+  const n = 161;
+  let acc = 0;
+  const tanPhi = Math.tan(phi);
+  const xiMax = 0.98;
+  for (let i = 0; i < n; i++) {
+    const xi = -xiMax + (2 * xiMax) * (i + 0.5) / n;
+    const theta = Math.atan(xi * tanPhi);
+    const xExit = xi * w;
+    const dLo = Math.atan((-slit - xExit) / dy) - theta;
+    const dHi = Math.atan((slit - xExit) / dy) - theta;
+    acc += normCdf(dHi / sigma) - normCdf(dLo / sigma);
+  }
+  return acc / n;
+}
+
+function pickSpecies() {
+  if (params.mix === 'equal') return (Math.random() * 3) | 0;
+  if (params.mix === 'trace') {
+    const r = Math.random();
+    if (r < 0.05) return 2;
+    if (r < 0.30) return 1;
+    return 0;
+  }
+  const r = Math.random();
+  if (r < SPECIES[0].feed) return 0;
+  if (r < SPECIES[0].feed + SPECIES[1].feed) return 1;
+  return 2;
+}
+
+function spawnOne(y) {
+  const p = {
+    xi: (Math.random() * 2 - 1) * 0.98,
+    x: 0, y: y == null ? Y_INLET : y,
+    vx: 0, vy: 0,
+    sp: pickSpecies(),
+    frozen: false,
+    counted: false,
+  };
+  placeOnStreamline(p);
+  particles.push(p);
+}
+
+function clearTallies() {
+  pass.fill(0);
+  wing.fill(0);
+  hist.forEach(h => h.fill(0));
+}
+
+function resetAll() {
+  particles.length = 0;
+  clearTallies();
+  const n = Math.min(params.nTarget, 900);
+  for (let i = 0; i < n; i++) {
+    const y = Y_INLET + Math.random() * (Y_DET - Y_INLET - 0.015);
+    spawnOne(y);
+  }
+}
+
+function placeOnStreamline(p) {
+  const xi = clamp(p.xi, -0.98, 0.98);
+  p.xi = xi;
+  if (p.y >= Y_EXIT) {
+    const w = exitHalf();
+    const u = worldSpeed(params.mach);
+    const theta = Math.atan(xi * Math.tan(wallPhi()));
+    p.vx = u * Math.sin(theta);
+    p.vy = u * Math.cos(theta);
+    applyKick(p);
+    const dy = p.y - Y_EXIT;
+    p.x = xi * w + dy * (p.vx / p.vy);
+    p.frozen = true;
+    return;
+  }
+  const w = halfWidth(p.y);
+  p.x = xi * w;
+  const M = machAt(p.y);
+  const u = worldSpeed(M);
+  const slope = xi * dHalfWidth(p.y);
+  const norm = Math.hypot(slope, 1);
+  p.vx = u * slope / norm;
+  p.vy = u / norm;
+}
+
+function applyKick(p) {
+  const u = Math.hypot(p.vx, p.vy) || 1e-8;
+  const theta = Math.atan2(p.vx, p.vy);
+  const delta = gauss() * sigmaTheta(SPECIES[p.sp].mass);
+  const psi = theta + delta;
+  p.vx = u * Math.sin(psi);
+  p.vy = u * Math.cos(psi);
+}
+
+function stepParticle(p, dt) {
+  if (!p.frozen) {
+    const w = Math.max(halfWidth(p.y), 1e-4);
+    const xi = clamp(p.x / w, -0.98, 0.98);
+    const M = machAt(p.y);
+    const u = worldSpeed(M);
+    const slope = xi * dHalfWidth(p.y);
+    const norm = Math.hypot(slope, 1);
+    p.vx = u * slope / norm;
+    p.vy = Math.max(u / norm, 1e-4);
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    const w2 = halfWidth(p.y);
+    if (p.y < Y_EXIT && Math.abs(p.x) > w2 * 0.98) p.x = Math.sign(p.x) * w2 * 0.98;
+    if (p.y >= Y_EXIT) {
+      p.frozen = true;
+      applyKick(p);
+    }
+    return;
+  }
+  p.x += p.vx * dt;
+  p.y += p.vy * dt;
+}
+
+function tally(p) {
+  if (p.counted) return;
+  p.counted = true;
+  const inside = Math.abs(p.x) < slitHalf();
+  if (inside) pass[p.sp]++;
+  else wing[p.sp]++;
+  const b = clamp(Math.floor(((p.x + HIST_X) / (2 * HIST_X)) * HIST_N), 0, HIST_N - 1);
+  hist[p.sp][b]++;
+}
+
+function simulate(dt) {
+  const sub = 3;
+  const h = dt / sub;
+  for (let s = 0; s < sub; s++) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      const y0 = p.y;
+      stepParticle(p, h);
+      if (!p.counted && y0 < Y_DET && p.y >= Y_DET) tally(p);
+      if (p.y > Y_DET + 0.03 || Math.abs(p.x) > 1.15 || p.y > 2.2) {
+        if (!p.counted) tally(p);
+        particles.splice(i, 1);
+      }
+    }
+  }
+  let guard = 0;
+  while (particles.length < params.nTarget && guard < 80) {
+    spawnOne();
+    guard++;
+  }
+}
+
+function resize() {
+  const panel = 304;
+  canvas.width = Math.max(320, window.innerWidth - panel);
+  canvas.height = window.innerHeight;
+  const pad = 18;
+  const worldW = WORLD.x1 - WORLD.x0;
+  const worldH = WORLD.y1 - WORLD.y0;
+  const scale = Math.min((canvas.width - pad * 2) / worldW, (canvas.height - pad * 2) / worldH);
+  view.scale = scale;
+  view.ox = (canvas.width - worldW * scale) / 2 - WORLD.x0 * scale;
+  view.oy = (canvas.height - worldH * scale) / 2 - WORLD.y0 * scale;
+}
+function sx(x) { return view.ox + x * view.scale; }
+function sy(y) { return view.oy + y * view.scale; }
+
+function drawWalls() {
+  ctx.beginPath();
+  const steps = 80;
+  for (let i = 0; i <= steps; i++) {
+    const y = Y_INLET + (Y_EXIT - Y_INLET) * (i / steps);
+    const x = halfWidth(y);
+    if (i === 0) ctx.moveTo(sx(x), sy(y));
+    else ctx.lineTo(sx(x), sy(y));
+  }
+  for (let i = steps; i >= 0; i--) {
+    const y = Y_INLET + (Y_EXIT - Y_INLET) * (i / steps);
+    ctx.lineTo(sx(-halfWidth(y)), sy(y));
+  }
+  ctx.closePath();
+  ctx.fillStyle = '#101028';
+  ctx.fill();
+  ctx.strokeStyle = '#8aa4cc';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  ctx.setLineDash([4, 4]);
+  ctx.strokeStyle = '#446688';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sx(-exitHalf()), sy(Y_EXIT));
+  ctx.lineTo(sx(exitHalf()), sy(Y_EXIT));
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  const slit = slitHalf();
+  const yDet = sy(Y_DET);
+  ctx.strokeStyle = '#c9a24a';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.moveTo(sx(-0.66), yDet);
+  ctx.lineTo(sx(-slit), yDet);
+  ctx.moveTo(sx(slit), yDet);
+  ctx.lineTo(sx(0.66), yDet);
+  ctx.stroke();
+  ctx.strokeStyle = '#243018';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(sx(-slit), yDet);
+  ctx.lineTo(sx(slit), yDet);
+  ctx.stroke();
+}
+
+function drawLabels() {
+  ctx.fillStyle = '#667799';
+  ctx.font = '11px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('FEED', sx(0), sy(Y_INLET) - 8);
+  ctx.fillText('freeze-out', sx(0), sy(Y_EXIT) - 6);
+  ctx.fillStyle = '#c9a24a';
+  ctx.fillText('skimmer', sx(0), sy(Y_DET) - 8);
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.fillStyle = '#8899bb';
+  const tagY = sy(Y_DET) + 16;
+  ctx.fillText('wings · light', sx(-0.42), tagY);
+  ctx.fillText('center · heavy', sx(0), tagY);
+  ctx.fillText('wings · light', sx(0.42), tagY);
+}
+
+function drawParticles() {
+  const r = Math.max(1.1, view.scale * 0.0075);
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    if (p.y < Y_INLET - 0.02 || p.y > Y_DET) continue;
+    ctx.fillStyle = SPECIES[p.sp].color;
+    ctx.globalAlpha = p.frozen ? 0.9 : 0.75;
+    ctx.beginPath();
+    ctx.arc(sx(p.x), sy(p.y), r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawHist() {
+  let peak = 1;
+  for (let s = 0; s < 3; s++) {
+    for (let i = 0; i < HIST_N; i++) peak = Math.max(peak, hist[s][i]);
+  }
+  if (peak <= 1) return;
+  const base = sy(1.74);
+  const top = sy(1.60);
+  ctx.globalAlpha = 0.9;
+  for (let s = 0; s < 3; s++) {
+    ctx.beginPath();
+    for (let i = 0; i < HIST_N; i++) {
+      const x = -HIST_X + (i + 0.5) * (2 * HIST_X) / HIST_N;
+      const h = (hist[s][i] / peak) * (base - top);
+      const X = sx(x);
+      if (i === 0) ctx.moveTo(X, base - h);
+      else ctx.lineTo(X, base - h);
+    }
+    ctx.strokeStyle = SPECIES[s].color;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = '#556677';
+  ctx.font = '10px Segoe UI, system-ui, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('arrival tally', sx(WORLD.x0) + 4, top + 10);
+}
+
+function draw() {
+  ctx.fillStyle = '#080818';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = '#1a2240';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(sx(0), sy(Y_INLET));
+  ctx.lineTo(sx(0), sy(Y_DET));
+  ctx.stroke();
+  drawWalls();
+  drawParticles();
+  drawLabels();
+  drawHist();
+}
+
+function fmt(n, d) { return n.toFixed(d); }
+function pct(n) { return (n * 100).toFixed(4) + '%'; }
+
+function betaOf(i) {
+  const n0 = pass[0] + wing[0];
+  const ni = pass[i] + wing[i];
+  if (n0 < 40 || ni < 40 || pass[0] === 0 || pass[i] === 0) return null;
+  const p0 = pass[0] / n0;
+  const pi = pass[i] / ni;
+  const b = pi / p0;
+  const se0 = Math.sqrt(p0 * (1 - p0) / n0);
+  const sei = Math.sqrt(pi * (1 - pi) / ni);
+  const se = b * Math.sqrt((sei / pi) ** 2 + (se0 / p0) ** 2);
+  return { b, se };
+}
+
+function renderStats() {
+  const Tf = frozenT();
+  const u = bulkSpeedMS(params.mach);
+  const flow = document.getElementById('stats-flow');
+  const sLines = SPECIES.map(sp => {
+    const S = speedRatio(sp.mass);
+    return `<div class="srow"><span>${sp.label}</span><span class="sv">S ${fmt(S, 2)} · σ ${fmt(sigmaTheta(sp.mass) * 180 / Math.PI, 2)}°</span></div>`;
+  }).join('');
+  flow.innerHTML = `
+    <div class="srow"><span>T freeze</span><span class="sv">${fmt(Tf, 1)} K</span></div>
+    <div class="srow"><span>Bulk speed</span><span class="sv">${fmt(u, 0)} m/s</span></div>
+    <div class="srow"><span>Exit half-angle</span><span class="sv">${fmt(params.wallDeg, 1)}°</span></div>
+    ${sLines}`;
+
+  const theories = SPECIES.map(sp => passProbability(sp.mass));
+  const b29t = theories[1] / theories[0];
+  const b30t = theories[2] / theories[0];
+  const b29 = betaOf(1);
+  const b30 = betaOf(2);
+  const counted = pass.reduce((a, b) => a + b, 0) + wing.reduce((a, b) => a + b, 0);
+  const cut = (pass[0] + wing[0]) > 0 ? pass[0] / (pass[0] + wing[0]) : theories[0];
+
+  let x15feed = (SPECIES[1].feed + 2 * SPECIES[2].feed) / 2;
+  const w = SPECIES.map((sp, i) => sp.feed * theories[i]);
+  const wsum = w[0] + w[1] + w[2];
+  const x15prod = (w[1] + 2 * w[2]) / (2 * wsum);
+
+  let x15meas = null;
+  if (pass[0] + wing[0] >= 30 && pass[1] + wing[1] >= 30) {
+    const tr = [0, 1, 2].map(i => pass[i] / Math.max(1, pass[i] + wing[i]));
+    const wm = SPECIES.map((sp, i) => sp.feed * tr[i]);
+    const sm = wm[0] + wm[1] + wm[2];
+    x15meas = (wm[1] + 2 * wm[2]) / (2 * sm);
+  }
+
+  const show = (stat) => stat == null
+    ? '<span class="sv dim">…</span>'
+    : `<span class="sv hot">${fmt(stat.b, 4)} ± ${fmt(stat.se, 4)}</span>`;
+  document.getElementById('stats-sep').innerHTML = `
+    <div class="srow"><span>Counted</span><span class="sv">${counted}</span></div>
+    <div class="srow"><span>Cut of ¹⁴N₂</span><span class="sv">${fmt(cut * 100, 1)}%</span></div>
+    <div class="srow"><span>β 29 theory</span><span class="sv">${fmt(b29t, 4)}</span></div>
+    <div class="srow"><span>β 29 measured</span>${show(b29)}</div>
+    <div class="srow"><span>β 30 theory</span><span class="sv">${fmt(b30t, 4)}</span></div>
+    <div class="srow"><span>β 30 measured</span>${show(b30)}</div>
+    <div class="srow"><span>√(m₂₉/m₂₈)</span><span class="sv">${fmt(Math.sqrt(SPECIES[1].mass / SPECIES[0].mass), 4)}</span></div>
+    <div class="srow"><span>¹⁵N feed</span><span class="sv">${pct(x15feed)}</span></div>
+    <div class="srow"><span>¹⁵N product theory</span><span class="sv">${pct(x15prod)}</span></div>
+    <div class="srow"><span>¹⁵N product measured</span>${x15meas == null ? '<span class="sv dim">…</span>' : `<span class="sv hot">${pct(x15meas)}</span>`}</div>
+    <div class="srow"><span>Center</span><span class="sv">${pass[0]} · ${pass[1]} · ${pass[2]}</span></div>
+    <div class="srow"><span>Wings</span><span class="sv">${wing[0]} · ${wing[1]} · ${wing[2]}</span></div>`;
+
+  document.getElementById('note').textContent =
+    'β is (nᵢ/n₂₈) in the center divided by the same ratio in the feed. The heavy molecules stay nearer the axis.';
+  renderCascade(theories);
+}
+
+const R29_0 = SPECIES[1].feed / SPECIES[0].feed;
+const R30_0 = SPECIES[2].feed / SPECIES[0].feed;
+
+function compositionAt(n, a29, a30) {
+  const r29 = R29_0 * Math.pow(a29, n);
+  const r30 = R30_0 * Math.pow(a30, n);
+  const den = 1 + r29 + r30;
+  return { x28: 1 / den, x29: r29 / den, x30: r30 / den };
+}
+
+function stagesUntil(target, a29, a30) {
+  if (!(a30 > 1) || compositionAt(0, a29, a30).x30 >= target) return compositionAt(0, a29, a30).x30 >= target ? 0 : null;
+  let lo = 0;
+  let hi = 1;
+  while (hi < 8000 && compositionAt(hi, a29, a30).x30 < target) hi *= 2;
+  if (compositionAt(hi, a29, a30).x30 < target) return null;
+  while (lo + 1 < hi) {
+    const mid = (lo + hi) >> 1;
+    if (compositionAt(mid, a29, a30).x30 >= target) hi = mid;
+    else lo = mid;
+  }
+  return hi;
+}
+
+function fmtX(x) {
+  if (x >= 0.01) return (x * 100).toFixed(2) + '%';
+  if (x >= 1e-4) return (x * 100).toFixed(4) + '%';
+  return x.toExponential(2);
+}
+
+function supExp(log10v) {
+  if (!isFinite(log10v)) return '—';
+  if (log10v < 3) return Math.pow(10, log10v).toFixed(1);
+  const e = Math.floor(log10v);
+  const m = Math.pow(10, log10v - e);
+  return `${m.toFixed(2)}×10<sup>${e}</sup>`;
+}
+
+function fmtGain(g) {
+  if (g >= 1000) return g.toExponential(2);
+  if (g >= 10) return g.toFixed(1);
+  return g.toFixed(2);
+}
+
+function renderCascade(t) {
+  const a29 = t[1] / t[0];
+  const a30 = t[2] / t[0];
+  const g29 = (1 - t[1]) / (1 - t[0]);
+  const g30 = (1 - t[2]) / (1 - t[0]);
+  const theta0 = SPECIES.reduce((s, sp, i) => s + sp.feed * t[i], 0);
+  const nMark = params.stages | 0;
+  const target = params.target;
+  const nE = stagesUntil(target, a29, a30);
+  const here = compositionAt(nMark, a29, a30);
+  const xF = SPECIES[2].feed;
+  let nS = null;
+  let xW = null;
+  let feedPer = null;
+  if (g30 < 1) {
+    nS = Math.ceil(Math.log(10) / Math.log(1 / g30));
+    xW = compositionAt(nS, g29, g30).x30;
+  }
+  const xP = nE == null ? null : compositionAt(nE, a29, a30).x30;
+  if (xP != null && xW != null && xF > xW) feedPer = (xP - xW) / (xF - xW);
+
+  let logSeries = 0;
+  if (nE != null) {
+    for (let i = 0; i < nE; i++) {
+      const c = compositionAt(i, a29, a30);
+      const th = c.x28 * t[0] + c.x29 * t[1] + c.x30 * t[2];
+      logSeries += -Math.log10(th);
+    }
+  }
+
+  const box = document.getElementById('stats-cascade');
+  box.innerHTML = `
+    <div class="srow"><span>α ¹⁵N₂</span><span class="sv hot">${fmt(a30, 4)}</span></div>
+    <div class="srow"><span>α ¹⁴N¹⁵N</span><span class="sv">${fmt(a29, 4)}</span></div>
+    <div class="srow"><span>Cut θ</span><span class="sv">${fmt(theta0 * 100, 1)}%</span></div>
+    <div class="srow"><span>After ${nMark}</span><span class="sv hot">${fmtX(here.x30)} ¹⁵N₂</span></div>
+    <div class="srow"><span></span><span class="sv">${fmtX(here.x29)} ¹⁴N¹⁵N</span></div>
+    <div class="srow"><span>Gain</span><span class="sv">×${fmtGain(here.x30 / xF)}</span></div>
+    <div class="srow"><span>Stages to target</span><span class="sv">${nE == null ? '—' : nE}</span></div>
+    <div class="srow"><span>Stripper stages</span><span class="sv">${nS == null ? '—' : nS}</span></div>
+    <div class="srow"><span>Series F/P to target</span><span class="sv">${nE == null ? '—' : supExp(logSeries)}</span></div>
+    <div class="srow"><span>Recycle F/P to target</span><span class="sv">${feedPer == null ? '—' : supExp(Math.log10(feedPer))}</span></div>`;
+
+  document.getElementById('cascade-note').textContent =
+    'Each center cut multiplies the ¹⁵N₂ / ¹⁴N₂ ratio by α. Series discards the wings, so the feed multiplies by about 1/θ every stage. Recycling the wings, and stripping the waste to a tenth of natural ¹⁵N₂, is the diffusion-plant arrangement. ¹⁴N¹⁵N is enriched by the same jets and stays abundant for a long way up the cascade.';
+
+  drawCascadeChart(a29, a30, nMark, nE, target);
+}
+
+function drawCascadeChart(a29, a30, nMark, nE, target) {
+  const c = document.getElementById('cascade');
+  if (!c || !c.getContext) return;
+  const g = c.getContext('2d');
+  if (!g) return;
+  const w = c.clientWidth || c.width;
+  if (c.width !== w) c.width = w;
+  const h = c.height;
+  g.fillStyle = '#080818';
+  g.fillRect(0, 0, w, h);
+  const nMax = Math.max(2, Math.min(800, Math.max(nMark, nE || 0)));
+  const yLo = -6;
+  const yHi = 0;
+  const padL = 38;
+  const padR = 8;
+  const padT = 14;
+  const padB = 16;
+  const X = (n) => padL + (n / nMax) * (w - padL - padR);
+  const Y = (x) => {
+    const ly = Math.log10(Math.max(x, 1e-8));
+    const t = (ly - yLo) / (yHi - yLo);
+    return padT + (1 - t) * (h - padT - padB);
+  };
+  g.strokeStyle = '#1a2240';
+  g.lineWidth = 1;
+  g.font = '9px Segoe UI, system-ui, sans-serif';
+  g.fillStyle = '#556677';
+  g.textAlign = 'right';
+  for (const dec of [-6, -4, -2, 0]) {
+    const y = Y(Math.pow(10, dec));
+    g.beginPath();
+    g.moveTo(padL, y);
+    g.lineTo(w - padR, y);
+    g.stroke();
+    g.fillText(dec === 0 ? '1' : ('1e' + dec), padL - 3, y + 3);
+  }
+  g.textAlign = 'center';
+  g.fillText('0', X(0), h - 4);
+  g.fillText(String(nMax), X(nMax), h - 4);
+
+  function strokeComp(idx, color) {
+    g.beginPath();
+    const steps = Math.min(nMax, 240);
+    for (let i = 0; i <= steps; i++) {
+      const n = Math.round((nMax * i) / steps);
+      const comp = compositionAt(n, a29, a30);
+      const x = idx === 30 ? comp.x30 : comp.x29;
+      const px = X(n);
+      const py = Y(x);
+      if (i === 0) g.moveTo(px, py);
+      else g.lineTo(px, py);
+    }
+    g.strokeStyle = color;
+    g.lineWidth = 1.6;
+    g.stroke();
+  }
+  if (a30 > 1) {
+    strokeComp(29, '#ffb020');
+    strokeComp(30, '#ff6b5a');
+  }
+  if (target > 0) {
+    g.setLineDash([3, 3]);
+    g.strokeStyle = '#ff6b5a';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(padL, Y(target));
+    g.lineTo(w - padR, Y(target));
+    g.stroke();
+    g.setLineDash([]);
+  }
+  if (nMark <= nMax) {
+    g.strokeStyle = '#99bbff';
+    g.lineWidth = 1;
+    g.beginPath();
+    g.moveTo(X(nMark), padT);
+    g.lineTo(X(nMark), h - padB);
+    g.stroke();
+  }
+  g.textAlign = 'left';
+  g.fillStyle = '#ff6b5a';
+  g.fillText('¹⁵N₂', padL + 4, 11);
+  g.fillStyle = '#ffb020';
+  g.fillText('¹⁴N¹⁵N', padL + 46, 11);
+}
+
+function bindRange(id, key, labelId, format, reset) {
+  const el = document.getElementById(id);
+  const lab = document.getElementById(labelId);
+  const apply = () => {
+    params[key] = parseFloat(el.value);
+    lab.textContent = format(params[key]);
+    if (reset) resetAll();
+    renderStats();
+  };
+  el.addEventListener('input', apply);
+  apply();
+}
+
+bindRange('sl-mach', 'mach', 'v-mach', v => v.toFixed(1), true);
+bindRange('sl-t0', 't0', 'v-t0', v => `${v.toFixed(0)} K`, true);
+bindRange('sl-wall', 'wallDeg', 'v-wall', v => `${v.toFixed(1)}°`, true);
+bindRange('sl-skim', 'skimDeg', 'v-skim', v => `${v.toFixed(1)}°`, true);
+bindRange('sl-n', 'nTarget', 'v-n', v => String(v), false);
+bindRange('sl-speed', 'speed', 'v-speed', v => `${v.toFixed(2)}×`, false);
+bindRange('sl-stages', 'stages', 'v-stages', v => String(Math.round(v)), false);
+
+document.getElementById('sel-target').addEventListener('change', e => {
+  params.target = parseFloat(e.target.value);
+  renderStats();
+});
+
+document.getElementById('sel-mix').addEventListener('change', e => {
+  params.mix = e.target.value;
+  resetAll();
+  renderStats();
+});
+document.getElementById('btn-pause').addEventListener('click', () => {
+  params.paused = !params.paused;
+  document.getElementById('btn-pause').textContent = params.paused ? 'Run' : 'Pause';
+  document.getElementById('btn-pause').classList.toggle('active', params.paused);
+});
+document.getElementById('btn-reset').addEventListener('click', () => { resetAll(); renderStats(); });
+
+window.addEventListener('resize', resize);
+resize();
+resetAll();
+renderStats();
+
+let last = performance.now();
+let statAcc = 0;
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (!params.paused) {
+    simulate(dt * params.speed);
+    statAcc += dt;
+    if (statAcc > 0.25) {
+      statAcc = 0;
+      renderStats();
+    }
+  }
+  draw();
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
