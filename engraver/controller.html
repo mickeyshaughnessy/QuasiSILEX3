@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engraver</title>
+<style>
+  :root {
+    --bg: #14160f;
+    --panel: #1e2318;
+    --line: #3c4232;
+    --text: #f4efe2;
+    --muted: #a3aa92;
+    --lime: #d6f25c;
+    --danger: #ff5c3a;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.4 "Avenir Next", "Segoe UI", sans-serif;
+  }
+  main { max-width: 480px; margin: 0 auto; padding: 20px 16px 36px; }
+  h1 { font-size: 22px; margin: 0; }
+  p { color: var(--muted); margin: 6px 0 0; }
+  button, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 2px solid var(--lime); outline-offset: 2px; }
+  .top { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+  #connect, #stop {
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: #2a3122;
+    padding: 10px 14px;
+  }
+  #stop { background: var(--danger); color: #1a0b07; border: 0; font-weight: 750; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 14px;
+    margin-top: 14px;
+  }
+  .pos { font: 28px/1.2 ui-monospace, Menlo, monospace; margin-top: 8px; }
+  #go {
+    width: 100%;
+    min-height: 92px;
+    margin-top: 14px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--lime);
+    color: #17200a;
+    font-size: 22px;
+    font-weight: 750;
+  }
+  #go.hot { background: #ffb25a; }
+  .file { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+  input[type="file"] { max-width: 220px; }
+  #log {
+    height: 120px;
+    overflow: auto;
+    margin: 0;
+    white-space: pre-wrap;
+    font: 12px/1.45 ui-monospace, Menlo, monospace;
+    color: #d7deC6;
+  }
+</style>
+</head>
+<body>
+<main>
+  <div class="top">
+    <div>
+      <h1>Engraver</h1>
+      <p id="status">Disconnected</p>
+    </div>
+    <div>
+      <button id="connect" type="button">Connect</button>
+      <button id="stop" type="button">STOP</button>
+    </div>
+  </div>
+  <section class="card">
+    <div class="pos" id="pos">—</div>
+    <button id="go" type="button" disabled>Trace square</button>
+  </section>
+  <section class="card file">
+    <div>
+      <strong id="file-name">No file</strong>
+      <p id="file-note">Load the gcode. The button traces its square, then runs it.</p>
+    </div>
+    <input id="file" type="file" accept=".gcode,.gc,.g,.nc,.ngc,.txt">
+  </section>
+  <section class="card">
+    <pre id="log"></pre>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const encoder = new TextEncoder();
+const state = {
+  port: null,
+  writer: null,
+  reading: false,
+  poll: 0,
+  waiters: [],
+  ignoreOks: 0,
+  writeChain: Promise.resolve(),
+  mpos: null,
+  wco: null,
+  wpos: null,
+  machine: "",
+  lines: [],
+  bounds: null,
+  fileName: "",
+  phase: "frame",
+  busy: false,
+  paused: false,
+  cancel: false,
+  homing: false,
+  settle: false,
+  haltedBoot: false,
+  lastHalt: 0,
+  reader: null,
+  ready: false,
+};
+
+function log(text) {
+  const box = $("log");
+  box.textContent += String(text).replace(/\s+$/, "") + "\n";
+  box.scrollTop = box.scrollHeight;
+}
+
+function machineWord() {
+  return (state.machine || "").split(/[: ]/)[0];
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function render() {
+  const connected = !!state.port;
+  let label = "Trace square";
+  let hot = false;
+  if (!connected) label = "Trace square";
+  else if (!state.ready) label = "Waiting";
+  else if (state.paused) {
+    label = "Resume";
+    hot = true;
+  } else if (state.busy && state.phase === "run") {
+    label = "Pause";
+    hot = true;
+  } else if (state.busy) label = "Tracing";
+  else if (state.phase === "run") {
+    label = "Run laser";
+    hot = true;
+  }
+  $("go").textContent = label;
+  $("go").classList.toggle("hot", hot);
+  $("go").disabled = !connected || !state.ready;
+  $("status").textContent = connected ? (state.machine || "Connected") : "Disconnected";
+  const work = state.wpos
+    || (state.mpos && state.wco
+      ? state.mpos.map((value, i) => value - (state.wco[i] || 0))
+      : state.mpos);
+  $("pos").textContent = work ? `X ${work[0].toFixed(3)}   Y ${work[1].toFixed(3)}` : "—";
+}
+
+function parseStatus(line) {
+  const parts = line.slice(1, -1).split("|");
+  state.machine = parts[0];
+  let mpos = null;
+  let wpos = null;
+  let wco = null;
+  for (const part of parts.slice(1)) {
+    const cut = part.indexOf(":");
+    if (cut < 0) continue;
+    const nums = part.slice(cut + 1).split(",").map(Number);
+    const key = part.slice(0, cut);
+    if (key === "MPos") mpos = nums;
+    if (key === "WPos") wpos = nums;
+    if (key === "WCO") wco = nums;
+  }
+  if (mpos) state.mpos = mpos;
+  if (wco) state.wco = wco;
+  state.wpos = wpos;
+  render();
+}
+
+function watchBoot(line) {
+  if (!state.settle) return;
+  const homing = machineWord() === "Home" || line.startsWith("<Home");
+  const booting = line.startsWith("Grbl") || line.includes("tarx=") || line.includes("b dir:");
+  if (!homing && !booting) return;
+  const now = Date.now();
+  if (now - state.lastHalt < 200) return;
+  state.lastHalt = now;
+  state.haltedBoot = true;
+  writeRaw(new Uint8Array([0x85, 0x21])).catch(() => {});
+}
+
+function handleLine(line) {
+  if (!line) return;
+  watchBoot(line);
+  if (line.startsWith("<") && line.endsWith(">")) {
+    parseStatus(line);
+    return;
+  }
+  if (line === "ok" || line.startsWith("error:")) {
+    if (state.ignoreOks > 0) {
+      state.ignoreOks -= 1;
+      return;
+    }
+    const waiter = state.waiters.shift();
+    if (!waiter) return;
+    clearTimeout(waiter.timer);
+    waiter.lines.push(line);
+    waiter.resolve(waiter.lines);
+    if (line.startsWith("error:")) log(line);
+    return;
+  }
+  const waiter = state.waiters[0];
+  if (waiter) waiter.lines.push(line);
+  if (line.startsWith("Grbl") || line.startsWith("ALARM:") || line.startsWith("error:")) log(line);
+}
+
+function expectOk(timeout) {
+  return new Promise((resolve, reject) => {
+    const waiter = { lines: [], resolve, reject, timer: 0 };
+    waiter.timer = setTimeout(() => {
+      const index = state.waiters.indexOf(waiter);
+      if (index >= 0) {
+        state.waiters.splice(index, 1);
+        state.ignoreOks += 1;
+      }
+      reject(new Error("no reply"));
+    }, timeout);
+    state.waiters.push(waiter);
+  });
+}
+
+function writeRaw(data) {
+  const bytes = typeof data === "string" ? encoder.encode(data) : data;
+  const run = state.writeChain.then(async () => {
+    if (!state.writer) throw new Error("Not connected");
+    await state.writer.write(bytes);
+  });
+  state.writeChain = run.catch(() => {});
+  return run;
+}
+
+async function sendLine(line, timeout) {
+  const pending = expectOk(timeout);
+  await writeRaw(line + "\n");
+  const lines = await pending;
+  const last = lines[lines.length - 1] || "";
+  if (last.startsWith("error:")) throw new Error(last);
+  return lines;
+}
+
+async function readLoop() {
+  const decoder = new TextDecoder();
+  let carry = "";
+  while (state.reading && state.port && state.port.readable) {
+    let reader;
+    try {
+      reader = state.port.readable.getReader();
+    } catch (error) {
+      if (state.reading) log(error.message);
+      break;
+    }
+    state.reader = reader;
+    try {
+      while (state.reading) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        carry += decoder.decode(value, { stream: true });
+        let nl;
+        while ((nl = carry.indexOf("\n")) >= 0) {
+          handleLine(carry.slice(0, nl).replace(/\r$/, ""));
+          carry = carry.slice(nl + 1);
+        }
+      }
+    } catch (error) {
+      if (state.reading) log("Lost the link: " + error.message);
+      break;
+    } finally {
+      try { reader.releaseLock(); } catch (error) { /* already released */ }
+      if (state.reader === reader) state.reader = null;
+    }
+  }
+}
+
+async function shutdownPort(port) {
+  state.reading = false;
+  state.settle = false;
+  state.ready = false;
+  state.busy = false;
+  clearInterval(state.poll);
+  const pending = state.waiters.splice(0);
+  state.ignoreOks += pending.length;
+  for (const waiter of pending) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error("disconnected"));
+  }
+  const reader = state.reader;
+  if (reader) {
+    try { await reader.cancel(); } catch (error) { /* read loop is exiting */ }
+  }
+  const writer = state.writer;
+  state.writer = null;
+  try { await state.writeChain; } catch (error) { /* write already failed */ }
+  state.writeChain = Promise.resolve();
+  if (writer) {
+    try { writer.releaseLock(); } catch (error) { /* already released */ }
+  }
+  for (let i = 0; i < 50; i++) {
+    const readLocked = !!(port && port.readable && port.readable.locked);
+    const writeLocked = !!(port && port.writable && port.writable.locked);
+    if (!state.reader && !readLocked && !writeLocked) break;
+    await sleep(10);
+  }
+  if (port) {
+    try { await port.close(); } catch (error) { log(error.message); }
+  }
+}
+
+async function stopAll() {
+  state.cancel = true;
+  state.paused = false;
+  const pending = state.waiters.splice(0);
+  state.ignoreOks += pending.length + 1;
+  for (const waiter of pending) {
+    clearTimeout(waiter.timer);
+    waiter.reject(new Error("stopped"));
+  }
+  try {
+    await writeRaw(new Uint8Array([0x85, 0x21]));
+    await writeRaw("M5\n");
+  } catch (error) {
+    log(error.message);
+  }
+  state.phase = "frame";
+  state.busy = false;
+  log("Stopped. Laser off.");
+  render();
+}
+
+async function settleOnConnect() {
+  state.settle = true;
+  state.haltedBoot = false;
+  state.cancel = false;
+  try {
+    await sleep(4000);
+    state.settle = false;
+    if (!state.port || state.cancel || !state.haltedBoot) {
+      if (state.port && !state.cancel) log("Connected. Waiting.");
+      return;
+    }
+    await writeRaw(new Uint8Array([0x85, 0x21]));
+    await sleep(400);
+    if (machineWord() === "Hold") await writeRaw(Uint8Array.of(0x7e));
+    if (machineWord() === "Alarm") await sendLine("$X", 4000);
+    log("Startup motion stopped. The head stays put.");
+  } catch (error) {
+    if (error.message !== "stopped" && error.message !== "disconnected") log(error.message);
+  } finally {
+    state.settle = false;
+    state.ready = !!state.port;
+    state.phase = "frame";
+    render();
+  }
+}
+
+async function connect() {
+  if (state.port) {
+    await disconnect();
+    return;
+  }
+  if (!navigator.serial) {
+    log("Open this page in Chrome.");
+    return;
+  }
+  let port;
+  try {
+    port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303a, usbProductId: 0x4001 }] });
+  } catch (error) {
+    if (error.name !== "NotFoundError") throw error;
+    port = await navigator.serial.requestPort();
+  }
+  if (port.readable || port.writable) await shutdownPort(port);
+  state.ready = false;
+  await port.open({ baudRate: 115200, bufferSize: 255, flowControl: "none" });
+  try {
+    await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  } catch (error) {
+    log(error.message);
+  }
+  state.port = port;
+  state.writer = port.writable.getWriter();
+  state.reading = true;
+  state.machine = "Connected";
+  $("connect").textContent = "Disconnect";
+  render();
+  readLoop();
+  state.poll = setInterval(() => {
+    if (state.port) writeRaw(Uint8Array.of(0x3f)).catch(() => {});
+  }, 200);
+  settleOnConnect();
+}
+
+async function disconnect() {
+  state.cancel = true;
+  const port = state.port;
+  state.port = null;
+  $("connect").textContent = "Connect";
+  render();
+  await shutdownPort(port);
+  render();
+}
+
+function prepareGcode(text) {
+  return text.split(/\r?\n|\r/).map((line) => {
+    const semi = line.indexOf(";");
+    if (semi >= 0) line = line.slice(0, semi);
+    return line.replace(/\([^)]*\)/g, "").trim();
+  }).filter((line) => line && line !== "%");
+}
+
+function boundsOf(lines) {
+  let x = 0;
+  let y = 0;
+  let abs = true;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let any = false;
+  for (const line of lines) {
+    const words = line.toUpperCase().match(/[A-Z]-?\d*\.?\d+/g) || [];
+    let nx = null;
+    let ny = null;
+    let move = false;
+    for (const word of words) {
+      const value = Number(word.slice(1));
+      if (word[0] === "G" && value === 90) abs = true;
+      if (word[0] === "G" && value === 91) abs = false;
+      if (word[0] === "G" && (value === 0 || value === 1 || value === 2 || value === 3)) move = true;
+      if (word[0] === "X") nx = value;
+      if (word[0] === "Y") ny = value;
+    }
+    if (!move || (nx === null && ny === null)) continue;
+    if (nx !== null) x = abs ? nx : x + nx;
+    if (ny !== null) y = abs ? ny : y + ny;
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    any = true;
+  }
+  return any ? { minX, minY, maxX, maxY } : null;
+}
+
+function squareLines(bounds) {
+  const box = bounds || { minX: 0, minY: 0, maxX: 10, maxY: 10 };
+  const x1 = box.minX.toFixed(3);
+  const y1 = box.minY.toFixed(3);
+  const x2 = box.maxX.toFixed(3);
+  const y2 = box.maxY.toFixed(3);
+  return [
+    "M5",
+    "G21",
+    "G90",
+    `G0 S0 X${x1} Y${y1}`,
+    `G0 X${x2} Y${y1}`,
+    `G0 X${x2} Y${y2}`,
+    `G0 X${x1} Y${y2}`,
+    `G0 X${x1} Y${y1}`,
+    "M5",
+  ];
+}
+
+async function play(lines) {
+  state.busy = true;
+  state.cancel = false;
+  state.paused = false;
+  render();
+  let index = 0;
+  let rx = 0;
+  const inflight = [];
+  const finish = (bytes) => {
+    rx -= bytes;
+  };
+  try {
+    while ((index < lines.length || inflight.length) && !state.cancel) {
+      while (!state.paused && !state.cancel && index < lines.length && inflight.length < 8 && rx + lines[index].length + 1 <= 112) {
+        const line = lines[index++];
+        const bytes = line.length + 1;
+        rx += bytes;
+        const tracked = expectOk(60000).then((result) => {
+          finish(bytes);
+          const last = result[result.length - 1] || "";
+          if (last.startsWith("error:")) throw new Error(last + " — " + line);
+        }, (error) => {
+          finish(bytes);
+          throw error;
+        });
+        inflight.push(tracked);
+        await writeRaw(line + "\n");
+      }
+      if (!inflight.length) {
+        if (state.paused) await sleep(40);
+        else break;
+        continue;
+      }
+      await inflight.shift();
+    }
+  } finally {
+    state.busy = false;
+    state.paused = false;
+    render();
+  }
+}
+
+async function onGo() {
+  if (!state.port) return;
+  if (state.busy && state.phase === "run") {
+    state.paused = !state.paused;
+    try {
+      await writeRaw(Uint8Array.of(state.paused ? 0x21 : 0x7e));
+    } catch (error) {
+      log(error.message);
+    }
+    log(state.paused ? "Paused." : "Resumed.");
+    render();
+    return;
+  }
+  if (state.busy) return;
+  if (state.phase === "frame") {
+    const box = state.bounds;
+    log(box ? "Tracing the file square. Laser off." : "Tracing a 10 mm square. Laser off.");
+    try {
+      await play(squareLines(box));
+      if (!state.cancel) {
+        state.phase = "run";
+        log("Square done. Next press runs the file with the laser.");
+      }
+    } catch (error) {
+      if (error.message !== "stopped") {
+        log(error.message);
+        await stopAll();
+      }
+    }
+    render();
+    return;
+  }
+  if (!state.lines.length) {
+    log("Load the gcode file first.");
+    return;
+  }
+  log("Running " + state.fileName + " with the laser.");
+  try {
+    await play(state.lines);
+    if (!state.cancel) {
+      await sendLine("M5", 4000);
+      log("File finished. Laser off.");
+      state.phase = "frame";
+    }
+  } catch (error) {
+    if (error.message !== "stopped") {
+      log(error.message);
+      await stopAll();
+    }
+  }
+  render();
+}
+
+$("connect").addEventListener("click", () => connect().catch((error) => log(error.message)));
+$("stop").addEventListener("click", () => stopAll());
+$("go").addEventListener("click", () => onGo());
+$("file").addEventListener("change", async () => {
+  const file = $("file").files[0];
+  if (!file) return;
+  state.lines = prepareGcode(await file.text());
+  state.bounds = boundsOf(state.lines);
+  state.fileName = file.name;
+  state.phase = "frame";
+  $("file-name").textContent = file.name;
+  $("file-note").textContent = state.bounds
+    ? `${state.lines.length} lines. Square ${state.bounds.minX.toFixed(1)},${state.bounds.minY.toFixed(1)} to ${state.bounds.maxX.toFixed(1)},${state.bounds.maxY.toFixed(1)} mm.`
+    : `${state.lines.length} lines. No X Y motion found.`;
+  render();
+});
+
+render();
+
+if (location.hash === "#selftest") {
+  parseStatus("<Idle|MPos:1.500,-2.000,0.000|FS:0,0|WCO:0.500,0.000,0.000>");
+  const lines = prepareGcode("G21\nG90\nG0 X0 Y0\n; note\nG1 X10 S300\nG1 Y8\nM5\n");
+  const bounds = boundsOf(lines);
+  const square = squareLines(bounds);
+  state.ignoreOks = 1;
+  handleLine("ok");
+  document.body.dataset.selftest = [
+    state.machine,
+    state.mpos[0],
+    state.wco[0],
+    lines.length,
+    bounds.minX,
+    bounds.minY,
+    bounds.maxX,
+    bounds.maxY,
+    square.length,
+    square[3],
+    state.ignoreOks,
+  ].join("|");
+}
+</script>
+</body>
+</html>
